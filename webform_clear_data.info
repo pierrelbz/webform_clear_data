@@ -1,0 +1,6 @@
+name =  webform clear data
+description = Webform, by default, store datas in database. This module let you save datas in database or not.
+core = 7.x
+package = Webform
+dependencies[] = webform
+ 

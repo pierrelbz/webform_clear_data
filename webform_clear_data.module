@@ -1,0 +1,159 @@
+<?php
+/**
+ * Created by PhpStorm.
+ * User: pierre.lesbazeilles
+ * Date: 21/12/2015
+ * Time: 15:35
+ */
+/**
+ * Implements hook_form_alter().
+ * @param $form
+ * @param $form_state
+ * @param $form_id
+ */
+function webform_clear_data_form_alter(&$form, &$form_state, $form_id) {
+  switch ($form_id) {
+    // Configuration form for the individual webforms.
+    case 'webform_configure_form':
+
+      $form['#submit'][] = 'webform_clear_data_configure_save';
+      $clear=_webform_clear_data_st($form['nid']['#value']);
+      $form['submission']['clear'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Webform submissions : no save datas'),
+        '#description' => t('if checked, Webform don\'t Store data anymore. Datas will lost when user submit the form.'),
+        '#default_value' =>  $clear,
+      );
+      break;
+    case strstr($form_id, 'webform_client_form'):
+      if(_webform_clear_data_st($form['#node']->nid)){
+        $form['#submit'][] = 'webform_clear_data_submit_result';
+        foreach($form['#submit'] as $k=>$v){
+          if($v=="webform_client_form_submit"){
+            unset($form['#submit'][$k]);
+          }
+        }
+      }
+      break;
+  }
+}
+
+/**
+ * @param $form
+ * @param $form_state
+ * @return bool|int
+ */
+function webform_clear_data_configure_save($form, &$form_state){
+  return _webform_clear_data_write($form['nid']['#value'],$form_state['values']['clear']);
+}
+
+/**
+ * Fetch .
+ *
+ * @param int $nid
+ *   The node ID of this webform.
+ *
+ * @return array
+ *   The array of permissions for this webform.
+ */
+function _webform_clear_data_st($nid) {
+ $result= db_select('webform', 'w', array('fetch' => PDO::FETCH_ASSOC))
+    ->fields('w')
+    ->condition('w.nid', $nid)
+    ->condition('w.clear_on_submit', "1")
+    ->execute()
+    ->fetchAllKeyed();
+  $val=(count($result)>0)?true:false;
+  return $val;
+}
+
+/**
+ * @param $nid
+ * @param $clear
+ * @return bool|int
+ */
+function _webform_clear_data_write($nid, $clear) {
+  $webform_clear_data = array(
+    'nid'=> $nid,
+    'clear_on_submit'  => $clear
+  );
+  return drupal_write_record('webform', $webform_clear_data, 'nid');
+
+
+}
+
+
+
+/**
+ * @param $form
+ * @param $form_state
+ */
+function webform_clear_data_submit_result($form, &$form_state){
+
+  module_load_include('inc', 'webform', 'includes/webform.submissions');
+  module_load_include('inc', 'webform', 'includes/webform.components');
+  global $user;
+
+  if (empty($form_state['save_draft']) && empty($form_state['webform_completed'])) {
+    return;
+  }
+
+  $node =  $form['#node'];
+  // Check if user is submitting as a draft.
+  $is_draft = (int) !empty($form_state['save_draft']);
+
+
+  // Check if this form is sending an email.
+  if (!$is_draft && !$form_state['values']['details']['finished']) {
+    $submission = webform_submission_create($node, $user, $form_state);
+    webform_submission_send_mail($node, $submission);
+  }
+
+  // Strip out empty tags added by WYSIWYG editors if needed.
+  $confirmation = strlen(trim(strip_tags($node->webform['confirmation']))) ? $node->webform['confirmation'] : '';
+  $confirmation = webform_replace_tokens($confirmation, $node, $submission, NULL, TRUE);
+
+  // Check confirmation and redirect_url fields.
+  $message = NULL;
+  $redirect = NULL;
+  $external_url = FALSE;
+  $redirect_url = trim($node->webform['redirect_url']);
+  if (isset($form['actions']['draft']['#value']) && $form_state['values']['op'] == $form['actions']['draft']['#value']) {
+    $message = t('Submission saved. You may return to this form later and it will restore the current values.');
+  }
+  elseif ($is_draft) {
+    // No redirect needed
+  }
+  elseif (!empty($form_state['values']['details']['finished'])) {
+    $message = t('Submission no updated.');
+    $redirect = "node/{$node->nid}";
+  }
+  elseif ($redirect_url == '<none>') {
+    // No redirect needed
+  }
+  elseif ($redirect_url == '<confirmation>') {
+    $query = array();
+    if ((int) $user->uid === 0) {
+      $query['token'] = md5($submission->submitted .  drupal_get_private_key());
+    }
+    $redirect = array('node/' . $node->nid . '/done', array('query' => $query));
+  }
+  else {
+    // Clean up the redirect URL, filter it for tokens and detect external domains.
+    $redirect = webform_replace_url_tokens($redirect_url, $node, $submission);
+    $external_url = $redirect[1]['#webform_external'];
+  }
+
+  // Show a message if manually set.
+  if (isset($message)) {
+    drupal_set_message(webform_replace_tokens($message, $node, NULL, NULL, TRUE));
+  }
+  // If redirecting and we have a confirmation message, show it as a message.
+  elseif (!$is_draft && !$external_url && (!empty($redirect_url) && $redirect_url != '<confirmation>') && !empty($confirmation)) {
+    drupal_set_message(check_markup(webform_replace_tokens($confirmation, $node), $node->webform['confirmation_format'], '', TRUE));
+  }
+
+  $form_state['redirect'] = $redirect;
+}
+
+

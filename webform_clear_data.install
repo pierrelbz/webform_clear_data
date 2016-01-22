@@ -1,0 +1,30 @@
+<?php
+
+ 
+/**
+ * Implements hook_install().
+ */
+function  webform_clear_data_install() {
+  $schema = drupal_get_schema('webform');
+  db_add_field('webform', 'clear_on_submit', $schema['fields']['clear_on_submit']);
+}
+
+/**
+ * Implements hook_schema_alter().
+ */
+function webform_clear_data_schema_alter(&$schema) {
+  $schema['webform']['fields']['clear_on_submit'] = array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => FALSE,
+    'unsigned' => TRUE,
+    'default' => 0,
+    'description' => 'Field added by webform_clear_data .Boolean value (0) ',
+  );
+}
+/**
+ * Implements hook_uninstall().
+ */
+function webform_clear_data_uninstall() {
+  db_drop_field('webform', 'clear_on_submit');
+}
